@@ -1,0 +1,19 @@
+# 恢复出来的源码树现在逐文件是 LF，这里把它钉住，免得不同机器的 core.autocrlf
+# 在 checkout 时把 scripts/providers/*.ps1 与 .mjs 改成 CRLF（字节一变，安装产物比对就失真）。
+* text=auto eol=lf
+*.ps1 text eol=lf
+*.mjs text eol=lf
+*.js text eol=lf
+*.cjs text eol=lf
+*.json text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+
+# 二进制资产不做任何行尾处理（安装产物本身已被 .gitignore 排除在仓库外）
+*.png binary
+*.ico binary
+*.exe binary
+*.dll binary
+*.asar binary
+*.zip binary

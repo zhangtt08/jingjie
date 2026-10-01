@@ -1,0 +1,7 @@
+{
+  "command": "node",
+  "args": ["agent/serve.mjs"],
+  "ready_port": 8796,
+  "base_url": "http://127.0.0.1:8796",
+  "note": "serve.mjs 只把标准 server.mjs 的端口固定成 8796（净界在 personal-agent-hub 端口表里的那一格）。args 不直接写 agent/server.mjs，是因为模板逐字复制过来的 server.mjs 兜底端口是 8790，而 MCP 桥从 ready_port 起向上探测 12 个端口 —— 指过去就会探测不到、30 秒超时。端口被占时按契约自动 +1 并写 agent/.endpoint。"
+}

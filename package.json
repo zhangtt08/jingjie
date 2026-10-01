@@ -1,0 +1,61 @@
+{
+  "name": "jingjie",
+  "version": "0.2.0",
+  "private": true,
+  "description": "净界 — Windows 深度清理、软件卸载与启动优化工具（源码由 0.2.0-beta.6 安装产物恢复）",
+  "type": "module",
+  "main": "./src/main/index.js",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "electron .",
+    "check": "node tools/check.mjs",
+    "test": "node --test test/",
+    "selftest": "node tools/selftest.mjs",
+    "extract:asar": "node tools/extract-asar.mjs \"../竞界-安装包/JingJie-runtime/resources/app.asar\" \"../竞界-安装包/_recovery/asar\" --verify",
+    "recover:source": "node tools/recover-source.mjs \"../竞界-安装包/_recovery/asar\" . --providers-dir \"../竞界-安装包/JingJie-runtime/resources/providers\"",
+    "smoke:runtime": "node tools/smoke-runtime.mjs",
+    "agent:serve": "node agent/serve.mjs",
+    "agent:mcp": "node agent/mcp-server.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "43.4.0"
+  },
+  "build": {
+    "productName": "净界",
+    "appId": "com.ztt.jingjie",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "scripts/providers",
+        "to": "providers"
+      },
+      {
+        "from": "assets/brand",
+        "to": "brand"
+      },
+      {
+        "from": "vendor/fs-helper",
+        "to": "fs-helper"
+      }
+    ],
+    "win": {
+      "icon": "assets/brand/icon.png",
+      "target": "nsis"
+    }
+  },
+  "_recoveredRuntimeVersions": {
+    "electron": "43.4.0",
+    "esbuild": "0.25.12 / 0.28.2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "lucide-react": "^1.31.0",
+    "source": "package.json + allowScripts of the 0.2.0-beta.6 archive"
+  }
+}

@@ -1,0 +1,38 @@
+# --- 依赖与构建产物 ---
+node_modules/
+dist/
+release/
+out/
+.vite/
+*.tsbuildinfo
+
+# --- 运行期数据（净界与 Agent 写的账本/隔离区/备份，不是仓库资产）---
+.data/
+*.log
+logs/
+
+# --- Agent API：实际监听地址是现场推断出来的临时文件 ---
+agent/.endpoint
+
+# --- 安装产物与原生二进制（安装包已整体移到 ~/Desktop/竞界-安装包，不在仓库里）---
+*.asar
+*.exe
+*.dll
+*.msi
+*.zip
+*.7z
+JingJie-runtime/
+_recovery/
+_probe/
+vendor/
+
+# --- Python（个人工具脚本残留）---
+__pycache__/
+*.py[cod]
+.venv/
+
+# --- 编辑器 / 系统 ---
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

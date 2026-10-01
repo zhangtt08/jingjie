@@ -13,6 +13,10 @@ npm run agent:serve      # = node agent/serve.mjs，起在 8796（被占时按�
 npm run agent:mcp        # MCP stdio 桥；服务没在跑时按 agent/launch.json 自动拉起
 ```
 
+> MCP 客户端请直接 spawn `node agent/mcp-server.mjs`（标准契约就是这么写的）。
+> 用 `npm run agent:mcp` 时 npm 会往 stdout 前置两行横幅（`> jingjie@0.2.0 agent:mcp` 与命令行本身），
+> 严格的 JSON-lines 读取器要加 `--silent`，否则前两行不是 JSON。桥自己的输出全走 stderr。
+
 等价写法：`AGENT_PORT=8796 node agent/server.mjs`。
 
 > `agent/server.mjs` 与 `agent/mcp-server.mjs` 是从

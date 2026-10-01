@@ -6,9 +6,12 @@
     <meta name="color-scheme" content="light" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'" />
     <title>净界</title>
-    <script type="module" crossorigin src="./assets/index-BqZXxDE4.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-BwS8ADgi.css">
-  <style>
+    <!-- 入口指向恢复出来的源码本身，不指向打包产物：
+         原来的 ./assets/index-*.js|css 是构建输出的哈希名，树里根本没有，
+         双击启动只会得到空白窗口。app.js 已能在无打包器、无安装步骤下直接跑（见 docs/SOURCE-RECOVERY.md）。 -->
+    <script type="module" src="./app.js"></script>
+    <link rel="stylesheet" href="./styles.css" />
+    <style>
       .jj-drag-strip { position: fixed; top: 0; left: 0; right: 0; height: 34px; z-index: 2147483000; -webkit-app-region: drag; }
       .jj-win-controls { position: fixed; top: 0; right: 0; z-index: 2147483001; display: flex; height: 34px; -webkit-app-region: no-drag; }
       .jj-win-controls button { display: grid; place-items: center; width: 44px; height: 100%; border: 0; padding: 0; background: transparent; color: rgba(100, 110, 125, 0.75); cursor: default; transition: background-color 150ms ease-out, color 150ms ease-out; }
@@ -18,7 +21,6 @@
   </head>
   <body>
     <div id="root"></div>
-    <script src="./assets/win-controls.js"></script>
-
+    <script src="./win-controls.js"></script>
   </body>
 </html>

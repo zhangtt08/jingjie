@@ -18,7 +18,10 @@ function isVolumeRoot(value) {
   return normalized === canonicalRule(win32.parse(value).root);
 }
 function environmentIsSafe(env) {
-  if (![env.userProfile, env.localAppData, env.tempRoot, env.windowsRoot].every(win32.isAbsolute)) return false;
+  // 缺一个环境变量要判成"不安全"，不能让 win32.isAbsolute(undefined) 抛 TypeError：
+  // 这条链的下游是会删文件的判定，崩溃不等于拒绝，只会把调用方推到 catch 分支上去猜。
+  const required = [env.userProfile, env.localAppData, env.tempRoot, env.windowsRoot];
+  if (!required.every((value) => typeof value === "string" && win32.isAbsolute(value))) return false;
   if (isVolumeRoot(env.userProfile) || isVolumeRoot(env.localAppData) || isVolumeRoot(env.tempRoot) || isVolumeRoot(env.windowsRoot)) return false;
   if (canonicalRule(env.localAppData) !== canonicalRule(win32.join(env.userProfile, "AppData", "Local"))) return false;
   if (canonicalRule(env.tempRoot) !== canonicalRule(win32.join(env.localAppData, "Temp"))) return false;

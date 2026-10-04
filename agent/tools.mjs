@@ -15,6 +15,7 @@ import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { AgentError } from './server.mjs';
+import { jingjieAppDataDir } from './token-store.mjs';
 import { createServices, buildEnvFromProcess, buildFoldersFromProcess } from '../src/main/services.js';
 import { environmentIsSafe, protectedRoots } from '../src/main/path-guard.js';
 import { resolvePowerShellExecutable, PROVIDER_SCRIPTS } from '../src/main/powershell-runner.js';
@@ -33,11 +34,13 @@ function dataRoot() {
   return process.env.JINGJIE_DATA_ROOT || path.join(ROOT, '.data', 'agent');
 }
 
-/** 真实应用账本（只读）：界面自己写的 history.json 在这里，Agent 只读不写。 */
+/**
+ * 真实应用账本（只读）：界面自己写的 history.json 在这里，Agent 只读不写。
+ * 目录判据只有一份：agent/token-store.mjs 的 jingjieAppDataDir() —— 本机令牌的落盘位置和
+ * 这里读历史的位置必须是同一个目录，各算各的迟早会分叉（守卫文件在 A、界面账本在 B）。
+ */
 function appDataRoot() {
-  if (process.env.JINGJIE_APP_DATA_DIR) return process.env.JINGJIE_APP_DATA_DIR;
-  const appData = process.env.APPDATA || process.env.AppData;
-  return appData ? path.join(appData, 'jingjie') : null;
+  return jingjieAppDataDir();
 }
 
 /**

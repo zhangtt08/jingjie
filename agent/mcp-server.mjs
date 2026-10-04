@@ -6,6 +6,8 @@ import { spawn } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { readAgentToken } from './token-store.mjs';
+import { DEFAULT_TOKEN_HEADER } from './local-guard.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
@@ -20,14 +22,24 @@ function endpointFile() {
 }
 
 async function rpc(base, method, params) {
+  // 本机守卫要求：Host 必须是 127.0.0.1:<port>（fetch 按 base 自动带），非 GET 必须带令牌。
+  // 令牌由服务端启动时自动生成并落盘 0600，桥按同一份判据读出来 —— 用户不需要设任何环境变量。
+  // 自动拉起的那条路上桥先于服务端写好文件，所以每次调用现读，不在模块加载时缓存。
+  const token = readAgentToken();
+  const headers = { 'content-type': 'application/json' };
+  if (token) headers[DEFAULT_TOKEN_HEADER] = token;
   const res = await fetch(`${base}/api/agent/${method === 'tools/list' ? 'tools' : 'tool'}`, {
     method: method === 'tools/list' ? 'GET' : 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers,
     body: method === 'tools/list' ? undefined : JSON.stringify(params),
     signal: AbortSignal.timeout(120_000),
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok || body.ok === false) throw new Error(body?.error?.message || `HTTP ${res.status}`);
+  if (!res.ok || body.ok === false) {
+    const reason = body?.error?.message || `HTTP ${res.status}`;
+    if (!token && method !== 'tools/list') throw new Error(`${reason}（本桥没读到本机令牌：服务没起来、或 JINGJIE_APP_DATA_DIR 与服务端不是同一个目录）`);
+    throw new Error(reason);
+  }
   return body;
 }
 

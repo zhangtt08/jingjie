@@ -21,14 +21,13 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { AtomicJsonStore, SerialExecutor } from "./storage.js";
+import { isRetryableResult } from "./retry-policy.js";
 
 const MAX_HISTORY = 40;
 const MAX_RECEIPTS_PER_SECTION = 400;
 const MAX_PREVIEW_PATHS = 2000;
 /** limits inherited from the existing controllers -- never exceed them here */
 const BATCH_LIMITS = { cleanup: 5000, aggressive: 100, software: 100, startup: 100 };
-/** skipping reasons that are policy decisions, not transient failures -> never auto-retried */
-const POLICY_SKIPS = new Set(["startup-entry-protected", "standard-uninstall-not-allowed", "unknown-rule", "mode-mismatch"]);
 
 function boundReceipts(items) {
   if (!Array.isArray(items) || items.length <= MAX_RECEIPTS_PER_SECTION) return items;
@@ -55,7 +54,10 @@ export class PlanController {
     this.now = options.now ?? (() => new Date());
     this.planTtlMs = options.planTtlMs ?? 15 * 60 * 1000;
     this.lastRun = null;
+    this.#builds = new Map();
   }
+
+  #builds;
 
   onProgress(listener) {
     this.listeners.add(listener);
@@ -79,9 +81,22 @@ export class PlanController {
   /**
    * Read-only: ask every subsystem for its current inventory and merge into one plan.
    * Each section carries its own `status`, so a failing subsystem shows up as a real
-   * failure instead of an empty list.
+   * failure instead of an empty list. `withEntries` attaches the (bounded) per-entry list
+   * every group contains -- the UI checklist needs ids, and preview()/execute() only ever
+   * accept ids that this call handed out.
    */
-  async build({ include } = {}) {
+  async build(options = {}) {
+    // Promise coalescing: two windows/panels asking for the same plan at once must not fire
+    // two concurrent scans (the underlying controllers refuse with scan-in-progress).
+    const key = JSON.stringify(options ?? {});
+    const existing = this.#builds.get(key);
+    if (existing) return existing;
+    const promise = this.#buildOnce(options).finally(() => this.#builds.delete(key));
+    this.#builds.set(key, promise);
+    return promise;
+  }
+
+  async #buildOnce({ include, withEntries = false, entryLimit = 2000 } = {}) {
     this.prune();
     const wanted = { cleanup: true, aggressive: true, software: true, startup: true, ...include };
     const sections = [];
@@ -93,6 +108,8 @@ export class PlanController {
           sourceTaskId: report.taskId,
           totals: { bytes: report.totalBytes, itemCount: report.items.length },
           skippedCount: report.skipped.length,
+          // 被安全规则拒绝/跳过的项必须露面并说明原因，而不是静默消失（PRODUCT-REVIEW #2）
+          skippedSummary: summarizeSkipped(report.skipped),
           groups: groupBy(report.items, (item) => item.ruleId, (item) => item.category).map((group) => ({
             id: group.key,
             label: group.label,
@@ -224,7 +241,7 @@ export class PlanController {
       sections
     };
     this.plans.set(plan.planId, plan);
-    return this.summarize(plan.planId);
+    return this.summarize(plan.planId, { withEntries, entryLimit });
   }
 
   async #section(id, label, produce) {
@@ -242,7 +259,7 @@ export class PlanController {
     return plan;
   }
 
-  summarize(planId) {
+  summarize(planId, { withEntries = false, entryLimit = 2000 } = {}) {
     const plan = this.get(planId);
     return {
       planId: plan.planId,
@@ -251,7 +268,7 @@ export class PlanController {
       sections: plan.sections.map((section) => {
         const groups = (section.groups ?? []).map((group) => {
           const entries = group.items ?? group.candidates ?? [];
-          return {
+          const projected = {
             id: group.id,
             label: group.label,
             sizeBytes: group.sizeBytes ?? entries.reduce((sum, entry) => sum + (entry.sizeBytes ?? 0), 0),
@@ -266,6 +283,13 @@ export class PlanController {
             irreversibleCount: entries.filter((entry) => entry.irreversible).length,
             administratorCount: entries.filter((entry) => entry.requiresAdministrator || entry.privilege === "administrator").length
           };
+          if (withEntries) {
+            // ids only ever come from this list; execute() refuses anything that preview()
+            // has not disclosed, and preview() only knows ids handed out here.
+            projected.entries = entries.slice(0, entryLimit).map((entry) => structuredClone(entry));
+            projected.entriesTruncated = entries.length > entryLimit;
+          }
+          return projected;
         });
         return {
           id: section.id,
@@ -275,6 +299,7 @@ export class PlanController {
           totals: section.totals,
           protectedSummary: section.protectedSummary,
           skippedCount: section.skippedCount,
+          skippedSummary: section.skippedSummary,
           groups
         };
       })
@@ -317,9 +342,19 @@ export class PlanController {
           paths.push({ path: item.path, sizeBytes: item.sizeBytes ?? 0, action: item.action ?? null, label: item.label });
         } else if (section.id === "aggressive" && item.kind === "file-cache") {
           // the aggressive scan keeps the per-file list in its own snapshot; read it out (no walking)
-          for (const file of this.aggressive.candidateFiles?.(item.id) ?? []) {
-            paths.push({ path: file.path, sizeBytes: file.sizeBytes, action: "delete", label: item.label });
+          const files = this.aggressive.candidateFiles?.(item.id) ?? [];
+          if (files.length) {
+            for (const file of files) {
+              paths.push({ path: file.path, sizeBytes: file.sizeBytes, action: "delete", label: item.label });
+            }
+          } else {
+            // snapshot 已经不在了（过期/已执行）：条目照常摊开，执行时由控制器报 unknown-task，不假装能删
+            paths.push({ path: null, sizeBytes: item.sizeBytes ?? 0, action: "delete-cache", label: item.label, detail: "文件级清单已不在本次扫描快照中，执行前会重新扫描", irreversible: false, reversible: true });
           }
+        } else {
+          // 无文件路径的动作（卸载程序、清回收站、Windows 官方维护）也要摊开，不许静默消失
+          const actionBySection = { software: "uninstall", startup: "disable-startup-entry", cleanup: item.action ?? "delete", aggressive: item.kind === "recycle-bin" ? "empty-recycle-bin" : "system-maintenance" };
+          paths.push({ path: null, sizeBytes: item.sizeBytes ?? 0, action: actionBySection[section.id] ?? "action", label: item.label, detail: item.detail ?? item.impact ?? null, irreversible: item.irreversible === true, reversible: item.reversible === true });
         }
       }
       sections.push({
@@ -370,21 +405,23 @@ export class PlanController {
         }
       }
       if (!chosen.length) continue;
-      const notPreviewed = chosen.filter((item) => !plan.previewed.has(`${section.id}:${item.id}`));
-      if (notPreviewed.length) {
-        const receipt = { sectionId: section.id, label: section.label, items: notPreviewed.slice(0, 20).map((item) => ({ itemId: item.id, label: item.label, status: "refused", reason: "preview-required" })) };
-        receipts.push(receipt);
-        emit({ phase: "refused", reason: "preview-required", count: notPreviewed.length });
-        continue;
-      }
-      const receipt = { sectionId: section.id, label: section.label, items: [] };
-      receipts.push(receipt);
       const labelOf = new Map(chosen.map((item) => [item.id, item]));
       const emit = (patch) => {
         const progress = { runId, planId, sectionId: section.id, ...patch };
         this.publish(progress);
         try { onProgress?.(structuredClone(progress)); } catch { /* progress is best effort */ }
       };
+      const notPreviewed = chosen.filter((item) => !plan.previewed.has(`${section.id}:${item.id}`));
+      if (notPreviewed.length) {
+        // 未先摊开路径的条目整段拒绝并如实回执（SECURITY-REVIEW S-01）。
+        // 这里曾引用了尚未定义的 emit（TDZ），修复后 refuse 分支会真的把回执发出去。
+        const receipt = { sectionId: section.id, label: section.label, items: notPreviewed.map((item) => ({ itemId: item.id, label: item.label, path: item.path ?? null, sizeBytes: item.sizeBytes ?? 0, status: "refused", reason: "preview-required" })) };
+        receipts.push(receipt);
+        emit({ phase: "refused", reason: "preview-required", count: notPreviewed.length });
+        continue;
+      }
+      const receipt = { sectionId: section.id, label: section.label, items: [] };
+      receipts.push(receipt);
       const limit = BATCH_LIMITS[section.id] ?? 100;
       const chunks = [];
       for (let index = 0; index < chosen.length; index += limit) chunks.push(chosen.slice(index, index + limit).map((item) => item.id));
@@ -416,6 +453,7 @@ export class PlanController {
               label: item?.label ?? String(id),
               path: item?.path ?? null,
               sizeBytes: section.id === "aggressive" ? result.freedBytes ?? 0 : item?.sizeBytes ?? 0,
+              freedBytes: result.freedBytes ?? null,
               status: result.status === "disabled" ? "succeeded" : result.status,
               reason: result.reason ?? null,
               action: result.action ?? item?.action ?? null,
@@ -449,11 +487,12 @@ export class PlanController {
       startedAt,
       finishedAt,
       irreversibleAck: irreversibleAck === true,
-      freedBytes: flattened.reduce((sum, item) => sum + (item.status === "succeeded" ? item.sizeBytes ?? 0 : 0), 0),
+      freedBytes: flattened.reduce((sum, item) => sum + (item.freedBytes ?? (item.status === "succeeded" ? item.sizeBytes ?? 0 : 0)), 0),
       counts: {
         succeeded: flattened.filter((item) => item.status === "succeeded").length,
         skipped: flattened.filter((item) => item.status === "skipped").length,
         failed: flattened.filter((item) => item.status === "failed").length,
+        refused: flattened.filter((item) => item.status === "refused").length,
         rebootRequired: flattened.filter((item) => item.status === "reboot-required").length
       },
       sections: receipts.map((receipt) => ({ ...receipt, items: boundReceipts(receipt.items) }))
@@ -464,8 +503,12 @@ export class PlanController {
   }
 
   /**
-   * Re-run only what genuinely failed last time. Policy skips (protected entries) are not
-   * retried -- retrying a deliberate refusal would just be a way to wear the guard down.
+   * Re-run only what genuinely failed last time (or was skipped by a transient reason like
+   * "software-locked"/"partial-skip"). Policy refusals and stale-snapshot skips are NOT retried:
+   * re-sending a deliberate refusal is a way to wear the guard down, and re-sending a
+   * changed-since-scan id can only skip again -- the honest remedy for that is a new plan.
+   * The owning controllers keep exactly these ids alive in their scan snapshots (retry-policy.js),
+   * so a retry never dies on "unknown-item".
    */
   async retry({ onProgress } = {}) {
     if (!this.lastRun) throw new Error("no-run-to-retry");
@@ -473,9 +516,7 @@ export class PlanController {
     for (const receipt of this.lastRun.sections) {
       for (const item of receipt.items) {
         if (item.itemId === "-") continue;
-        const transientFailure = item.status === "failed";
-        const retryableSkip = item.status === "skipped" && !POLICY_SKIPS.has(item.reason);
-        if (transientFailure || retryableSkip) selection.push(`${receipt.sectionId}:${item.itemId}`);
+        if (isRetryableResult(item)) selection.push(`${receipt.sectionId}:${item.itemId}`);
       }
     }
     if (!selection.length) return { retried: 0, run: this.lastRun };
@@ -526,4 +567,23 @@ function groupBy(rows, keyOf, labelOf) {
     map.get(key).rows.push(row);
   }
   return [...map.values()];
+}
+
+/**
+ * Group scan-level skips by reason and keep a few example paths per reason, so the UI can
+ * show WHY items were protected instead of a bare count (PRODUCT-REVIEW "被保护根拦下的项必须露面").
+ */
+function summarizeSkipped(skipped, maxReasons = 8, maxSamples = 3) {
+  if (!Array.isArray(skipped) || skipped.length === 0) return [];
+  const byReason = new Map();
+  for (const entry of skipped) {
+    const reason = typeof entry?.reason === "string" ? entry.reason : "unknown-skip";
+    const bucket = byReason.get(reason);
+    if (!bucket) byReason.set(reason, { reason, count: 1, samples: [entry?.path ?? ""] });
+    else {
+      bucket.count += 1;
+      if (bucket.samples.length < maxSamples && entry?.path) bucket.samples.push(entry.path);
+    }
+  }
+  return [...byReason.values()].sort((left, right) => right.count - left.count).slice(0, maxReasons);
 }

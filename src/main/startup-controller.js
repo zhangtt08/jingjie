@@ -7,6 +7,7 @@
 import { randomUUID, createHash } from "node:crypto";
 import { AtomicJsonStore, SerialExecutor } from "./storage.js";
 import { assertConfirmed } from "./request-validators.js";
+import { isRetryableResult } from "./retry-policy.js";
 class StartupController {
   constructor(options) {
     this.options = options;
@@ -30,7 +31,11 @@ class StartupController {
       startedAt: started.toISOString(),
       expiresAt: expires.toISOString()
     };
-    this.snapshots.set(report.taskId, { report, expiresAt: expires.getTime() });
+    this.snapshots.set(report.taskId, {
+      report,
+      remaining: new Set(report.items.map((item) => item.id)),
+      expiresAt: expires.getTime()
+    });
     return report;
   }
   disable(request) {
@@ -53,10 +58,11 @@ class StartupController {
     const byId = new Map(snapshot.report.items.map((item) => [item.id, item]));
     const selected = request.itemIds.map((id) => {
       const item = byId.get(id);
-      if (!item) throw new Error("unknown-item");
+      if (!item || !snapshot.remaining.has(id)) throw new Error("unknown-item");
       return item;
     });
-    this.snapshots.delete(request.taskId);
+    for (const id of request.itemIds) snapshot.remaining.delete(id);
+    // 失败的启动项要留在快照里可重试；结果明朗后再处置（releaseSnapshot）。
     const startedAt = this.now().toISOString();
     const planned = selected.map((item) => ({
       id: randomUUID(),
@@ -86,6 +92,7 @@ class StartupController {
         await this.updateRecord(transaction.id, (record) => ({ ...record, status: "failed", finishedAt: this.now().toISOString(), reason }));
       }
     }
+    this.releaseSnapshot(request.taskId, snapshot, request.itemIds, results);
     return {
       taskId: randomUUID(),
       requestedCount: selected.length,
@@ -96,6 +103,16 @@ class StartupController {
       startedAt,
       finishedAt: this.now().toISOString()
     };
+  }
+  /** Failed (e.g. UAC cancelled) entries stay claimable within the snapshot TTL; the rest are consumed. */
+  releaseSnapshot(taskId, snapshot, requestedIds, results) {
+    const byId = new Map((results ?? []).map((result) => [result.itemId, result]));
+    for (const id of requestedIds) {
+      const result = byId.get(id);
+      if (!result || isRetryableResult(result)) snapshot.remaining.add(id);
+    }
+    if (snapshot.remaining.size === 0) this.snapshots.delete(taskId);
+    else snapshot.expiresAt = this.now().getTime() + 15 * 6e4;
   }
   restore(id) {
     return this.serial.run(async () => {

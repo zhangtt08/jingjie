@@ -9,6 +9,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { AtomicJsonStore, SerialExecutor } from "./storage.js";
 import { scanRules, executeCleanup } from "./cleanup-engine.js";
 import { validateCleanRequest, assertConfirmed } from "./request-validators.js";
+import { isRetryableResult } from "./retry-policy.js";
 class CleanerController {
   constructor(options) {
     this.options = options;
@@ -99,8 +100,7 @@ class CleanerController {
       return item;
     });
     for (const id of request.itemIds) snapshot.remaining.delete(id);
-    if (snapshot.remaining.size === 0) this.snapshots.delete(request.taskId);
-    else snapshot.expiresAt = this.now().getTime() + 15 * 60 * 1e3;
+    // 快照先不删：失败/未处理的条目要留在 remaining 里才能重试（PRODUCT-REVIEW #3）。
     const jobId = randomUUID();
     const startedAt = this.now().toISOString();
     const job = {
@@ -162,12 +162,15 @@ class CleanerController {
         }
       });
       await this.history.update((history) => [report, ...history].slice(0, 50));
+      this.releaseSnapshot(request.taskId, snapshot, request.itemIds, report.results);
       job.status = report.cancelled ? "cancelled" : "completed";
       job.results = report.results;
       job.finishedAt = report.finishedAt;
       await persistJob(true);
       return report;
     } catch (error) {
+      // 整段失败：这一批 id 全部回到 remaining，快照还在 TTL 内就能重试（不谎报、不留半成品）。
+      this.releaseSnapshot(request.taskId, snapshot, request.itemIds, []);
       job.status = "failed";
       job.finishedAt = this.now().toISOString();
       job.failureReason = error instanceof Error ? error.message : "unknown-error";
@@ -176,6 +179,20 @@ class CleanerController {
     } finally {
       if (this.activeCleanup === abortController) this.activeCleanup = void 0;
     }
+  }
+  /**
+   * Only genuinely retryable outcomes stay claimable against this snapshot (retry-policy.js):
+   * failed or items a cancellation never reached. Policy refusals and stale ids are consumed --
+   * their honest remedy is a fresh scan, not a retry that can only skip again.
+   */
+  releaseSnapshot(taskId, snapshot, requestedIds, results) {
+    const byId = new Map((results ?? []).map((result) => [result.itemId, result]));
+    for (const id of requestedIds) {
+      const result = byId.get(id);
+      if (!result || isRetryableResult(result)) snapshot.remaining.add(id);
+    }
+    if (snapshot.remaining.size === 0) this.snapshots.delete(taskId);
+    else snapshot.expiresAt = this.now().getTime() + 15 * 60 * 1e3;
   }
   getHistory() {
     return this.history.read();

@@ -7,6 +7,7 @@
 import { randomUUID, createHash } from "node:crypto";
 import { AtomicJsonStore, SerialExecutor } from "./storage.js";
 import { assertConfirmed } from "./request-validators.js";
+import { isRetryableResult } from "./retry-policy.js";
 import { createUninstallAction } from "./uninstall-plan.js";
 class SoftwareController {
   constructor(options) {
@@ -94,8 +95,7 @@ class SoftwareController {
       return item;
     });
     for (const itemId2 of request.itemIds) snapshot.remaining.delete(itemId2);
-    if (snapshot.remaining.size === 0) this.snapshots.delete(request.taskId);
-    else snapshot.expiresAt = this.now().getTime() + 15 * 6e4;
+    // 快照留到结果明朗再处置：失败的卸载要能重试（releaseSnapshot / retry-policy.js）。
     const jobId = randomUUID();
     const startedAt = this.now().toISOString();
     const job = {
@@ -170,11 +170,13 @@ class SoftwareController {
         startedAt,
         finishedAt
       };
+      this.releaseSnapshot(request.taskId, snapshot, request.itemIds, collected);
       await this.reports.update((reports) => [report, ...reports].slice(0, 50));
       await this.updateJob(jobId, (current) => ({ ...current, status: "completed", finishedAt }));
       emit("completed");
       return report;
     } catch (error) {
+      this.releaseSnapshot(request.taskId, snapshot, request.itemIds, collected);
       await this.updateJob(jobId, (current) => ({
         ...current,
         status: "failed",
@@ -183,6 +185,19 @@ class SoftwareController {
       }));
       throw error;
     }
+  }
+  /**
+   * Same contract as CleanerController.releaseSnapshot: only retryable outcomes (failed, or a
+   * cancellation that never ran) stay claimable; succeeded / policy-skipped ids are consumed.
+   */
+  releaseSnapshot(taskId, snapshot, requestedIds, results) {
+    const byId = new Map((results ?? []).map((result) => [result.itemId, result]));
+    for (const id of requestedIds) {
+      const result = byId.get(id);
+      if (!result || isRetryableResult(result)) snapshot.remaining.add(id);
+    }
+    if (snapshot.remaining.size === 0) this.snapshots.delete(taskId);
+    else snapshot.expiresAt = this.now().getTime() + 15 * 6e4;
   }
   async history() {
     await this.ready;

@@ -18,6 +18,8 @@ function canonical(value) {
 function operationReason(error) {
   const message = error instanceof Error ? error.message : String(error);
   const lower = message.toLocaleLowerCase("en-US");
+  // 文件已经不在了（上一次重试删掉了 / 用户自己清了）不是失败，也不能算"我删的"：如实报 not-found。
+  if (/enoent|no such file/.test(lower)) return "not-found";
   if (/eacces|eperm|access.*denied|permission/.test(lower)) return "permission-denied";
   if (/ebusy|locked|sharing violation|being used/.test(lower)) return "software-locked";
   if (/changed-since-scan/.test(lower)) return "changed-since-scan";
@@ -25,7 +27,7 @@ function operationReason(error) {
   return message || "operation-failed";
 }
 function resultStatus(reason) {
-  return /permission-denied|software-locked|changed-since-scan|protected-root|outside-rule-root|symbolic-link|unsafe-rule-root/.test(reason) ? "skipped" : "failed";
+  return /permission-denied|software-locked|changed-since-scan|not-found|protected-root|outside-rule-root|symbolic-link|unsafe-rule-root/.test(reason) ? "skipped" : "failed";
 }
 const LEDGER_PATH_SAMPLE = 20;
 /** bounded, display-only projection of a candidate list for the persisted job ledger */
@@ -83,7 +85,13 @@ class AggressiveController {
         now: this.now(),
         signal: abort.signal
       });
-      if (!report.cancelled) this.snapshots.set(report.taskId, { report, candidates, expiresAt: this.now().getTime() + 15 * 60 * 1e3 });
+      if (!report.cancelled) this.snapshots.set(report.taskId, {
+        report,
+        candidates,
+        // 与 CleanerController 同一套 remaining 语义：没成功的候选留在快照里才能重试。
+        remaining: new Set(report.candidates.map((candidate) => candidate.id)),
+        expiresAt: this.now().getTime() + 15 * 60 * 1e3
+      });
       return report;
     } finally {
       this.activeScan = void 0;

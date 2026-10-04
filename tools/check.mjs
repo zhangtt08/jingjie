@@ -64,14 +64,54 @@ for (const html of walk(ROOT).filter((f) => f.endsWith('.html'))) {
   }
 }
 
-// 4) PowerShell provider 是真实能力来源，缺一个就说明恢复不完整
+// 4) 文档里指向仓库**入库文件**的链接与路径必须存在。
+// 这一条的理由就是本轮修掉的那个毛病：45 个源码文件头与界面入口都写着
+// "see docs/SOURCE-RECOVERY.md"，而 docs/ 从来没有被恢复出来 —— 指向不存在的文档不是笔误，
+// 是"文档说的东西没法核对"。只查 md（README 与 docs/ 自己）里的仓库内文件引用，
+// 不查代码注释里的评审编号：那四份评审文档确实没随产物救出来，如实登记在
+// docs/SOURCE-RECOVERY.md 的 §7，这里不假称它们存在，也不允许新的一份文档假装它们存在。
+const DOC_FILES = ['README.md', 'README.zh-CN.md', 'agent/README.md', 'docs/SOURCE-RECOVERY.md']
+  .filter((f) => existsSync(path.join(ROOT, f)));
+// 住在别的仓库或确实没有随产物救出来的文档：允许出现这个名字，但必须在 §7 里登记过
+const KNOWN_EXTERNAL_DOCS = new Set([
+  'docs/AGENT_API_STANDARD.md',
+  'docs/SECURITY-REVIEW.md', 'docs/PRODUCT-REVIEW.md', 'docs/SOURCE-REVIEW.md', 'docs/RUNBOOK.md'
+]);
+// 安装产物目录被 .gitignore 排除，本机在、干净克隆不在：允许引用，但不算"已核对存在"
+const UNTRACKED_PREFIXES = ['JingJie-runtime/', '_recovery/', 'vendor/', 'node_modules/', 'dist/'];
+let docRefs = 0;
+let docUntrackedRefs = 0;
+const docProblems = new Set();   // 同一个文件里链接与反引号各写一次同一个路径，只报一条
+for (const doc of DOC_FILES) {
+  const text = readFileSync(path.join(ROOT, doc), 'utf8');
+  const specs = new Set();
+  for (const m of text.matchAll(/\]\((\.?\/?[^)\s#]+?)\)/g)) specs.add(m[1]);   // markdown 链接
+  for (const m of text.matchAll(/`((?:src|agent|tools|scripts|test|docs|assets|JingJie-runtime|_recovery|vendor)\/[^`\s]+)`/g)) specs.add(m[1]);
+  for (const spec of specs) {
+    if (/^(https?:|mailto:|data:)/.test(spec)) continue;
+    const clean = spec.replace(/^\.\//, '').replace(/[:/]\d+(?:-\d+)?$/, '');    // 去掉 index.html:11 这类行号尾巴
+    if (KNOWN_EXTERNAL_DOCS.has(clean)) continue;
+    if (UNTRACKED_PREFIXES.some((prefix) => clean.startsWith(prefix))) {
+      docUntrackedRefs++;                                                        // 本机产物，只数不判
+      continue;
+    }
+    if (/[*?[\]<>|]|…|\.\.\./.test(clean) || clean.endsWith('/')) continue;      // 通配/示意形状不是具体路径
+    const candidates = [path.resolve(path.join(ROOT, path.dirname(doc)), clean), path.join(ROOT, clean)];
+    if (candidates.some((c) => existsSync(c))) docRefs++;
+    else docProblems.add(`${doc} 引用了仓库里不存在的文件：${clean}`);
+  }
+}
+for (const problem of docProblems) failures.push(problem);
+notes.push(`文档里的 ${docRefs} 处入库文件引用全部存在（扫描 ${DOC_FILES.length} 份 md，另有 ${docUntrackedRefs} 处指向 .gitignore 排除的本机产物）`);
+
+// 5) PowerShell provider 是真实能力来源，缺一个就说明恢复不完整
 const providerDir = path.join(ROOT, 'scripts', 'providers');
 const EXPECTED = ['software-inventory.ps1', 'software-remove-appx.ps1', 'startup-inventory.ps1', 'startup-action.ps1', 'aggressive-maintenance.ps1'];
 for (const p of EXPECTED) {
   if (!existsSync(path.join(providerDir, p))) failures.push(`provider 脚本缺失：scripts/providers/${p}`);
 }
 
-// 5) Agent 工具面必须自洽（名字前缀、schema、risk、handler 齐全）
+// 6) Agent 工具面必须自洽（名字前缀、schema、risk、handler 齐全）
 try {
   const mod = await import(pathToFileURL(path.join(ROOT, 'agent', 'tools.mjs')).href);
   const tools = mod.tools || [];

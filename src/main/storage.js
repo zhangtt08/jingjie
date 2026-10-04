@@ -50,10 +50,15 @@ class AtomicJsonStore {
     const corruptPath = `${this.filePath}.corrupt`;
     const handle = await open(temporaryPath, "wx");
     try {
-      await handle.writeFile(JSON.stringify(value, null, 2), "utf8");
-      await handle.sync();
-    } finally {
-      await handle.close();
+      try {
+        await handle.writeFile(JSON.stringify(value, null, 2), "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+    } catch (error) {
+      await rm(temporaryPath, { force: true });
+      throw error;
     }
     let primaryMoved = false;
     let corruptPrimaryMoved = false;

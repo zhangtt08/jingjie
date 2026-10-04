@@ -303,3 +303,5 @@ ${item.publisher ?? ""}`.toLocaleLowerCase("zh-CN").includes(search);
     ] }) : null
   ] });
 }
+
+export { SoftwarePanel };

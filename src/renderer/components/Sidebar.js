@@ -53,3 +53,5 @@ function Sidebar({ active, onSelect, onOpenAbout }) {
     /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: "settings-button", "aria-label": "关于净界", onClick: onOpenAbout, children: /* @__PURE__ */ jsxRuntimeExports.jsx(Info, {}) })
   ] });
 }
+
+export { Sidebar };

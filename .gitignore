@@ -39,3 +39,6 @@ Thumbs.db
 
 # 桌面启动快捷方式是本机产物，随安装位置变，不入库
 *.lnk
+.env
+.env.*
+!.env.example

@@ -36,3 +36,5 @@ function MetricList({ categories }) {
     ] })
   ] });
 }
+
+export { MetricList, fallback };

@@ -37,3 +37,5 @@ function mergeUninstallReports(previous, next) {
     results: [...previous.results, ...next.results]
   };
 }
+
+export { UNINSTALL_BATCH_SIZE, failureReason, mergeUninstallReports, riskLabel, sourceLabel$1 };

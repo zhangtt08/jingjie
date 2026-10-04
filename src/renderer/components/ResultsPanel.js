@@ -26,3 +26,5 @@ function ResultsPanel({ report }) {
     ] })
   ] });
 }
+
+export { ResultsPanel };

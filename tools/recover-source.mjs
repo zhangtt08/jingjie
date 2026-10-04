@@ -330,7 +330,8 @@ for (const mod of RENDERER_MANIFEST) {
   if (!DRY) {
     const target = path.join(rendererDir, mod.file);
     fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, header + mod.body + '\n');
+    const exports = own.size ? `\nexport { ${[...own].sort().join(', ')} };\n` : '';
+    fs.writeFileSync(target, header + mod.body + '\n' + exports);
   }
 }
 report.push(`renderer app modules: ${RENDERER_MANIFEST.length} -> src/renderer/`);

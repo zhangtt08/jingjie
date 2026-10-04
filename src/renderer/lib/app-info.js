@@ -32,3 +32,5 @@ function describeFailure(reason, fallback2) {
   }
   return fallback2;
 }
+
+export { APP_NAME, APP_VERSION, KNOWN_FAILURES, POLICY_VERSION, describeFailure, getJingJieApi };

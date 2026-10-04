@@ -36,3 +36,5 @@ function HistoryPanel({ entries }) {
     ] }, entry.taskId)) })
   ] });
 }
+
+export { HistoryPanel };

@@ -50,3 +50,5 @@ function QuarantinePanel({ entries, loading, message, onRestore, onDismissMessag
     ] }, entry.id)) })
   ] });
 }
+
+export { QuarantinePanel, fileName };

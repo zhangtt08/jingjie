@@ -81,3 +81,5 @@ function ScanPanel({ phase, report, cleanup, progress, error, batch, onScan, onC
     ] })
   ] });
 }
+
+export { ScanPanel, actionLabel };

@@ -27,3 +27,5 @@ function formatBytes(value) {
   }
   return `${amount >= 10 || unit === 0 ? Math.round(amount) : amount.toFixed(1)} ${units[unit]}`;
 }
+
+export { formatBytes, formatBytes$1 };

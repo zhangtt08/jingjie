@@ -308,3 +308,5 @@ function AggressivePanel() {
     ] }) : null
   ] });
 }
+
+export { AggressivePanel, PHASE_LABEL };

@@ -43,16 +43,24 @@ function appDataRoot() {
 /**
  * fs-helper 是执行删除时真正兜住保护边界的原生小程序，仓库不收录二进制
  * （src/main/index.js 的 dev 解析走 vendor/fs-helper，那份不在版本库里）。
- * 这里额外回查安装产物目录——安装包已从 项目/ 移到 Desktop/竞界-安装包，所以两级都要试。
+ * 这里额外回查安装产物目录 —— 安装包先被移出 项目/ 到 Desktop/竞界-安装包，
+ * 2026-10-02 又合并进 Desktop/软件/，所以三个位置都试（新位置在前，旧位置留着当兜底）。
+ * 上一版这里写的是 `ROOT/../竞界-安装包`（少算一级，永远找不到），靠下一级的
+ * `ROOT/../../竞界-安装包` 才命中 —— 少一级这条注释，下次挪目录还会重犯。
  * 找不到的时候扫描/预览仍可用，扩展清理与提权动作会如实报 fs-helper-missing（fail closed）。
  */
+const HELPER_TAIL = path.join('JingJie-runtime', 'resources', 'fs-helper', 'JingJieFsHelper.exe');
 function helperCandidates() {
   return [
     process.env.JINGJIE_FS_HELPER,
     path.join(ROOT, 'vendor', 'fs-helper', 'JingJieFsHelper.exe'),
     process.resourcesPath ? path.join(process.resourcesPath, 'fs-helper', 'JingJieFsHelper.exe') : null,
-    path.join(ROOT, '..', '竞界-安装包', 'JingJie-runtime', 'resources', 'fs-helper', 'JingJieFsHelper.exe'),
-    path.join(ROOT, '..', '..', '竞界-安装包', 'JingJie-runtime', 'resources', 'fs-helper', 'JingJieFsHelper.exe')
+    // 安装产物现在整体住在仓库内的 JingJie-runtime/（.gitignore 排除，所以不入库）。
+    path.join(ROOT, 'JingJie-runtime', 'resources', 'fs-helper', 'JingJieFsHelper.exe'),
+    // 下面三条是它被挪来挪去时用过的历史位置，留着当兜底，找不到就照旧 fail closed。
+    path.join(ROOT, '..', '..', '软件', '竞界-安装包', HELPER_TAIL),
+    path.join(ROOT, '..', '..', '竞界-安装包', HELPER_TAIL),
+    path.join(ROOT, '..', '竞界-安装包', HELPER_TAIL)
   ].filter(Boolean);
 }
 

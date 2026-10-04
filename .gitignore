@@ -14,7 +14,7 @@ logs/
 # --- Agent API：实际监听地址是现场推断出来的临时文件 ---
 agent/.endpoint
 
-# --- 安装产物与原生二进制（安装包已整体移到 ~/Desktop/竞界-安装包，不在仓库里）---
+# --- 安装产物与原生二进制（安装产物住在仓库内 JingJie-runtime/，体积 318M，绝不入库）---
 *.asar
 *.exe
 *.dll
@@ -36,3 +36,6 @@ __pycache__/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# 桌面启动快捷方式是本机产物，随安装位置变，不入库
+*.lnk
